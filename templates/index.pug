@@ -1,0 +1,9 @@
+html
+  head
+    title Welcome to my blog!
+  body
+    h1 Blog Posts:
+    
+    for post in posts
+      h2: a.title(href='/' + post.slug + '.html')= post.title
+      p= post.description

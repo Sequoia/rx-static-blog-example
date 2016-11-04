@@ -8,6 +8,7 @@ const md = require('markdown-it')();
 const path = require('path');
 
 const renderPost = pug.compileFile(`${__dirname}/templates/post.pug`);
+const renderIndex = pug.compileFile(`${__dirname}/templates/index.pug`);
 
 function bug(name){
   return { next: debug(`x:${name}:next`), error: debug(`x:${name}:error`), complete: debug(`x:${name}:done`) };
@@ -62,16 +63,9 @@ const postsParsed$ = postsAndMetadata$.map(function flattenPostObject(post){
 
 const postsListing$ = metadata$
   .scan(function(acc, post){
-    // we CANNOT mutate `acc` as it is used downstream for comparison
-    // clone (using object.assign) in order to avoid mutation
-    let newPostMetadata = {};
-    newPostMetadata[post.slug] = post;
-    return Object.assign({}, acc, newPostMetadata);
+    acc[post.slug] = post;
+    return acc;
   }, {})
-  .debounceTime(100)
-  .distinctUntilChanged((x, y) => {
-    return JSON.stringify(x) === JSON.stringify(y);
-  })
   .map(function formatForTemplate(postsObject){
     return {
       posts : Object.keys(postsObject)
@@ -81,10 +75,18 @@ const postsListing$ = metadata$
       }, [])
     };
   })
-  .subscribe(bug('indexed'));
+  .distinctUntilChanged((x, y) => {
+    return JSON.stringify(x) === JSON.stringify(y);
+  })
+  .debounceTime(100);
+  // .subscribe(bug('indexed'));
 
 postsParsed$
   .subscribe(writePost);
+
+postsListing$
+  .map(renderIndex)
+  .subscribe(writeIndexPage);
 
 function writePost(post){
   var outfile = path.join(__dirname, 'out', `${post.slug}.html`);
@@ -95,14 +97,13 @@ function writePost(post){
     });
 }
 
-function writeIndexPage(pages){
-  const contents = '\nINDEX\n=====\n';
-  const indexPage = Object.keys(pages)
-    .map(key => pages[key])
-    .reduce((out, cur) => {
-      return `${out}* ${cur}`;
-    },contents);
-  writeIndex(indexPage);
+function writeIndexPage(indexPage){
+  var outfile = path.join(__dirname, 'out', `index.html`);
+  writeFileAsObservable(outfile, indexPage)
+    .subscribe({
+      next: () => console.log('wrote ' + outfile),
+      error: console.error
+    });
 }
 
 // postsParsed$.subscribe(bug('contents'));

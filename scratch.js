@@ -1,66 +1,125 @@
 console.log('==============\n==============\n\n\n\n');
 const Rx = require('rxjs');
 const debug = require('debug');
+const frontmatter = require('frontmatter');
 const noop = ()=>{};
+const pug = require('pug');
+const md = require('markdown-it')();
+const path = require('path');
+
+const renderPost = pug.compileFile(`${__dirname}/templates/post.pug`);
+
+function bug(name){
+  return { next: debug(`x:${name}:next`), error: debug(`x:${name}:error`), complete: debug(`x:${name}:done`) };
+}
 
 const chokidar = require('chokidar');
 const dirWatcher = chokidar.watch('./_data/*.md');
 
-const readFile = require('fs').readFile;
-const readFileAsObservable = Rx.Observable.bindNodeCallback(readFile);
+const fs = require('fs');
+const readFileAsObservable = Rx.Observable.bindNodeCallback(fs.readFile);
+const writeFileAsObservable = Rx.Observable.bindNodeCallback(fs.writeFile);
 
 const newFiles     = Rx.Observable.fromEvent(dirWatcher, 'add');
 const changedFiles = Rx.Observable.fromEvent(dirWatcher, 'change');
 
-const changesPlusCreation1 = newFiles.map(filename => {
+// for each added file...  
+const latestFileContents$ = newFiles.mergeMap(filename => {
+  // 1. get a stream of changes (and emit that filename 1x)
   return changedFiles
+  // 2. only take those for THIS file,
     .filter(name => name === filename)
-    .startWith(filename);
-}).mergeAll();
-
-const fileContents = changesPlusCreation1.map(f => {
-  return Rx.Observable.zip(
-    Rx.Observable.of(f),
-    readFileAsObservable(f, 'utf-8'),
-    function(name, content){
-      return {name, content: format(content)};
-    }
-  );
+  // 3. emit filename once to start (on "add")
+    .startWith(filename)
+  // 4. read the file contents (as an observable)
+    .map(filename => readFileAsObservable(filename, 'utf-8'))
+  // 5. Merge the Observable<Observable<file contents>> to Observable<file contents>
+    .mergeAll()
+  // 6. don't emit unless the file contents actually changed
+    .distinctUntilChanged();
 });
 
-const contentsOfAll = fileContents.concatAll().scan(function(acc, val){
-  acc[val.name] = val.content;
-  return acc;
-}, {});
+//
+const postsAndMetadata$ = latestFileContents$
+  .map(frontmatter);
 
-contentsOfAll.debounceTime(100)
-  .subscribe(function writeIndexPage(pages){
-    const contents = '\nINDEX\n=====\n';
-    const indexPage = Object.keys(pages)
-      .map(key => pages[key])
-      .reduce((out, cur) => {
-        return `${out}* ${cur}`;
-      },contents);
-    debug('write-index')(indexPage);
+const metadata$ = postsAndMetadata$
+  .pluck('data');
+
+const postsParsed$ = postsAndMetadata$.map(function flattenPostObject(post){
+  //merge the post body into the "data" property created by frontmatter
+  // in: { data: { title: 'foo' }, content: '...' }
+    let data = post.data;
+    data.body = post.content;
+    return data;
+  // out: { title: 'foo', content: '...' }
+  })
+  .map(function renderAndTemplate(post){
+    post.body = md.render(post.body);
+    post.rendered = renderPost(post);
+    return post;
   });
 
-function format(cont){
-  // debug('formatting')(cont);
-  return 'FORMATTED: ' + cont;
+const postsListing$ = metadata$
+  .scan(function(acc, post){
+    // we CANNOT mutate `acc` as it is used downstream for comparison
+    // clone (using object.assign) in order to avoid mutation
+    let newPostMetadata = {};
+    newPostMetadata[post.slug] = post;
+    return Object.assign({}, acc, newPostMetadata);
+  }, {})
+  .debounceTime(100)
+  .distinctUntilChanged((x, y) => {
+    return JSON.stringify(x) === JSON.stringify(y);
+  })
+  .map(function formatForTemplate(postsObject){
+    return {
+      posts : Object.keys(postsObject)
+      .reduce(function(acc, key){
+        acc.push(postsObject[key]);
+        return acc;
+      }, [])
+    };
+  })
+  .subscribe(bug('indexed'));
+
+postsParsed$
+  .subscribe(writePost);
+
+function writePost(post){
+  var outfile = path.join(__dirname, 'out', `${post.slug}.html`);
+  writeFileAsObservable(outfile, post.rendered)
+    .subscribe({
+      next: () => console.log('wrote ' + outfile),
+      error: console.error
+    });
 }
 
-const changesPlusCreation2 = newFiles.merge(changedFiles);
+function writeIndexPage(pages){
+  const contents = '\nINDEX\n=====\n';
+  const indexPage = Object.keys(pages)
+    .map(key => pages[key])
+    .reduce((out, cur) => {
+      return `${out}* ${cur}`;
+    },contents);
+  writeIndex(indexPage);
+}
 
-// const numbersOfAll = doubles.scan()
+// postsParsed$.subscribe(bug('contents'));
 
-// const 
+//debounce to wait 
 
-//debug subscribers
-// doubles.subscribe(  debug('numbers:next'), debug('numbers:error'), debug('numbers:done'));
-// newFiles.subscribe( debug('newFiles:next'), debug('newFiles:error'), debug('newFiles:done') );
-// fileContents.concatAll().subscribe( debug('fileContents:next'), debug('fileContents:error'), debug('fileContents:done') );
-// changesPlusCreation1.subscribe( debug('changesPlusCreation1:next'), debug('changesPlusCreation1:error'), debug('changesPlusCreation1:done') );
-// contentsOfAll.subscribe( debug('contentsOfAll:next'), debug('contentsOfAll:error'), debug('contentsOfAll:done') );
-// numbersOfAll.subscribe( debug('numbersOfAll:next'), debug('numbersOfAll:error'), debug('numbersOfAll:done') );
-// changesPlusCreation2.subscribe( debug('changesPlusCreation2:next'), debug('changesPlusCreation2:error'), debug('changesPlusCreation2:done') );
-// changedFiles.subscribe(  debug('changedFiles:next'),  debug('changedFiles:error'),  debug('changedFiles:done'));
+
+//TODO
+// x read files
+// x distinctUntilChanged
+// x read updates
+// x parse frontmatter
+// x update posts with frontmatter
+// x template post
+// x parse markdown!!
+//   build index info
+//   distinctUntilChanged
+//   template index
+// x write posts
+//   write index

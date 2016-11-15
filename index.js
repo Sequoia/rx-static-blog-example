@@ -104,22 +104,3 @@ function writeIndexPage(indexPage){
       error: console.error
     });
 }
-
-// postsParsed$.subscribe(bug('contents'));
-
-//debounce to wait 
-
-
-//TODO
-// x read files
-// x distinctUntilChanged
-// x read updates
-// x parse frontmatter
-// x update posts with frontmatter
-// x template post
-// x parse markdown!!
-//   build index info
-//   distinctUntilChanged
-//   template index
-// x write posts
-//   write index

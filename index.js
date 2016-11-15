@@ -9,6 +9,7 @@ const path = require('path');
 const renderPost = pug.compileFile(`${__dirname}/templates/post.pug`);
 const renderIndex = pug.compileFile(`${__dirname}/templates/index.pug`);
 
+//use observable$.subscribe(bug('LABEL-foo')) (and turn debug on via DEBUG=* node .) to see all notifications on an observable
 function bug(name){
   return { next: debug(`x:${name}:next`), error: debug(`x:${name}:error`), complete: debug(`x:${name}:done`) };
 }
@@ -78,7 +79,7 @@ const postsListing$ = metadata$
     return JSON.stringify(x) === JSON.stringify(y);
   })
   .debounceTime(100);
-  // .subscribe(bug('indexed'));
+  // postListings$.subscribe(bug('indexed'));
 
 postsParsed$
   .subscribe(writePost);
@@ -104,3 +105,5 @@ function writeIndexPage(indexPage){
       error: console.error
     });
 }
+
+// postsParsed$.subscribe(bug('contents'));
